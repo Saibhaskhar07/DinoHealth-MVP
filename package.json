@@ -1,0 +1,17 @@
+{
+  "name": "dino-health",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0",
+    "next": "^16.2.4",
+    "pdf-parse": "^1.1.1",
+    "react": "^18",
+    "react-dom": "^18"
+  }
+}
