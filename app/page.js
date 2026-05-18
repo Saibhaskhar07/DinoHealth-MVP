@@ -71,15 +71,15 @@ const saveResult = (userId, result) => {
 const computeHealthScore = (results) => {
   if (!results.length) return null
   const latest = results[0]
-  if (!latest.markerCount || !latest.normalCount) return 78
-  return Math.round((latest.normalCount / latest.markerCount) * 100)
+  if (latest.score !== undefined) return latest.score
+  return latest.hasFlags ? 72 : 88
 }
 
 // ─── MINI TREND CHART ─────────────────────────────────────────────────────────
 const TrendChart = ({ results }) => {
   if (results.length < 2) return null
-  const scores = results.slice(0, 6).reverse().map((r, i) => ({
-    score: r.normalCount && r.markerCount ? Math.round((r.normalCount / r.markerCount) * 100) : 78,
+  const scores = results.slice(0, 6).reverse().map((r) => ({
+    score: r.score !== undefined ? r.score : (r.normalCount && r.markerCount ? Math.round((r.normalCount / r.markerCount) * 100) : 78),
     label: new Date(r.date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }),
   }))
 
@@ -242,16 +242,37 @@ const AIExplainer = ({ setScreen, userId, onNewResult }) => {
       if (!res.ok || !data.success) throw new Error(data.error || 'Something went wrong.')
       setResult(data.explanation)
 
-      // Parse and save to localStorage
-      const markerCount = (data.explanation.match(/###/g) || []).length || 3
-      const normalCount = (data.explanation.match(/normal|in range/gi) || []).length
-      const hasFlags = data.explanation.toLowerCase().includes('below') || data.explanation.toLowerCase().includes('above') || data.explanation.toLowerCase().includes('low') || data.explanation.toLowerCase().includes('high')
+      const explanation = data.explanation
+      const lower = explanation.toLowerCase()
+
+      // Tiered severity scoring
+      // Each pattern group deducts a different amount from base score of 95
+      const borderlinePatterns = [/borderline/gi, /slightly (low|high|elevated|reduced)/gi, /mildly (low|high|elevated|reduced)/gi, /just (below|above)/gi, /low[- ]normal/gi]
+      const mildPatterns = [/below (the )?normal range/gi, /above (the )?normal range/gi, /outside (the )?normal range/gi, /\blow\b(?! normal)/gi, /\bhigh\b(?! normal)/gi, /elevated/gi, /deficien/gi, /reduced/gi]
+      const severePatterns = [/significantly (low|high|elevated|reduced|below|above)/gi, /markedly/gi, /severely/gi, /critically/gi, /very (low|high)/gi, /dangerously/gi, /well (below|above)/gi]
+
+      const countMatches = (patterns, text) => patterns.reduce((acc, p) => acc + (text.match(p) || []).length, 0)
+
+      const borderlineCount = countMatches(borderlinePatterns, explanation)
+      const mildCount = Math.max(0, countMatches(mildPatterns, explanation) - borderlineCount)
+      const severeCount = countMatches(severePatterns, explanation)
+
+      const hasFlags = borderlineCount > 0 || mildCount > 0 || severeCount > 0
+
+      // Deductions: borderline -5, mild -10, severe -20
+      const totalDeduction = (borderlineCount * 5) + (mildCount * 10) + (severeCount * 20)
+      const score = Math.max(30, Math.min(98, 95 - totalDeduction))
+
+      const totalMarkers = Math.max((explanation.match(/###/g) || []).length, 3)
+      const normalCount = totalMarkers - borderlineCount - mildCount - severeCount
+
       const saved = saveResult(userId, {
         name: file.name.replace('.pdf', '').replace(/-|_/g, ' '),
         date: new Date().toISOString(),
-        markerCount: Math.max(markerCount, 3),
-        normalCount: Math.min(normalCount, markerCount),
+        markerCount: totalMarkers,
+        normalCount: Math.max(0, normalCount),
         hasFlags,
+        score,
         explanation: data.explanation,
       })
       onNewResult(saved)
@@ -817,10 +838,9 @@ const Settings = ({ user, signOut, userId, onClearResults }) => {
       {/* Sign out */}
       <div style={{ background: t.card, borderRadius: 16, padding: '24px', border: `1px solid ${t.border}` }}>
         <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700, color: t.text }}>Account</h3>
-        <button onClick={() => openUserProfile()} style={{ display: 'flex', alignItems: 'center', gap: 10, background: t.dangerLight, border: 'none', borderRadius: 10, padding: '12px 20px', fontSize: 14, fontWeight: 700, color: t.danger, cursor: 'pointer', fontFamily: 'inherit' }}>
-  <Icon name="trash" size={16} color={t.danger}/> Delete Account
-</button>
-<p style={{ margin: '8px 0 0', fontSize: 12, color: t.muted }}>This will permanently delete your account and all data. This action cannot be undone.</p>
+        <button onClick={() => signOut()} style={{ display: 'flex', alignItems: 'center', gap: 10, background: t.dangerLight, border: 'none', borderRadius: 10, padding: '12px 20px', fontSize: 14, fontWeight: 700, color: t.danger, cursor: 'pointer', fontFamily: 'inherit' }}>
+          <Icon name="logout" size={16} color={t.danger}/> Sign out
+        </button>
       </div>
     </div>
   )
